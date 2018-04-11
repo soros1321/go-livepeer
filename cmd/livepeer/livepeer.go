@@ -258,6 +258,7 @@ func main() {
 				return
 			}
 
+			restartTranscoder(ctx, n)
 			defer n.StopEthServices()
 		}
 	}
@@ -305,6 +306,31 @@ func main() {
 		glog.Infof("Exiting Livepeer: %v", sig)
 		time.Sleep(time.Millisecond * 500) //Give time for other processes to shut down completely
 		return
+	}
+}
+
+func restartTranscoder(ctx context.Context, n *core.LivepeerNode) {
+	blknum, err := n.Eth.LatestBlockNum()
+	if err != nil {
+		return
+	}
+	// fetch active jobs
+	jobs, err := n.Database.ActiveJobs(blknum)
+	if err != nil {
+		glog.Error("Could not fetch active jobs ", err)
+		return
+	}
+	for _, j := range jobs {
+		job, err := n.Eth.GetJob(big.NewInt(j.ID)) // benchmark; may be faster to reconstruct locally?
+		if err != nil {
+			glog.Error("Unable to get job for ", j.ID, err)
+			continue
+		}
+		res, err := eventservices.DoTranscode(n, job)
+		if !res || err != nil {
+			glog.Error("Unable to restore transcoding of ", j.ID, err)
+			continue
+		}
 	}
 }
 

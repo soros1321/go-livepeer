@@ -109,8 +109,14 @@ func (s *JobService) Stop() error {
 }
 
 func (s *JobService) doTranscode(job *lpTypes.Job) (bool, error) {
+	return DoTranscode(s.node, job)
+}
+
+func DoTranscode(node *core.LivepeerNode, job *lpTypes.Job) (bool, error) {
+	// XXX check node address vs job transcoder assignment?
+
 	//Check if broadcaster has enough funds
-	bDeposit, err := s.node.Eth.BroadcasterDeposit(job.BroadcasterAddress)
+	bDeposit, err := node.Eth.BroadcasterDeposit(job.BroadcasterAddress)
 	if err != nil {
 		glog.Errorf("Error getting broadcaster deposit: %v", err)
 		return false, err
@@ -132,9 +138,9 @@ func (s *JobService) doTranscode(job *lpTypes.Job) (bool, error) {
 	glog.Infof("Transcoder got job %v - strmID: %v, tData: %v, config: %v", job.JobId, job.StreamId, job.TranscodingOptions, config)
 
 	//Do The Transcoding
-	cm := eth.NewBasicClaimManager(job.StreamId, job.JobId, job.BroadcasterAddress, job.MaxPricePerSegment, tProfiles, s.node.Eth, s.node.Ipfs)
-	tr := transcoder.NewFFMpegSegmentTranscoder(tProfiles, s.node.WorkDir)
-	strmIDs, err := s.node.TranscodeAndBroadcast(config, cm, tr)
+	cm := eth.NewBasicClaimManager(job.StreamId, job.JobId, job.BroadcasterAddress, job.MaxPricePerSegment, tProfiles, node.Eth, node.Ipfs)
+	tr := transcoder.NewFFMpegSegmentTranscoder(tProfiles, node.WorkDir)
+	strmIDs, err := node.TranscodeAndBroadcast(config, cm, tr)
 	if err != nil {
 		glog.Errorf("Transcode Error: %v", err)
 		return false, err
@@ -146,14 +152,14 @@ func (s *JobService) doTranscode(job *lpTypes.Job) (bool, error) {
 	for i, vp := range tProfiles {
 		vids[strmIDs[i]] = vp
 	}
-	if err = s.node.NotifyBroadcaster(sid.GetNodeID(), sid, vids); err != nil {
+	if err = node.NotifyBroadcaster(sid.GetNodeID(), sid, vids); err != nil {
 		glog.Errorf("Notify Broadcaster Error: %v", err)
 		return true, nil
 	}
 
 	firstClaimBlock := new(big.Int).Add(job.CreationBlock, eth.BlocksUntilFirstClaimDeadline)
 	headersCh := make(chan *types.Header)
-	s.eventMonitor.SubscribeNewBlock(context.Background(), fmt.Sprintf("FirstClaimForJob%v", job.JobId), headersCh, func(h *types.Header) (bool, error) {
+	node.EthEventMonitor.SubscribeNewBlock(context.Background(), fmt.Sprintf("FirstClaimForJob%v", job.JobId), headersCh, func(h *types.Header) (bool, error) {
 		if cm.DidFirstClaim() {
 			// If the first claim has already been made then exit
 			return false, nil
