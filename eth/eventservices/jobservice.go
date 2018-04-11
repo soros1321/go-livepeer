@@ -124,12 +124,15 @@ func DoTranscode(node *core.LivepeerNode, job *lpTypes.Job) (bool, error) {
 
 	if bDeposit.Cmp(job.MaxPricePerSegment) == -1 {
 		glog.Infof("Broadcaster does not have enough funds. Skipping job")
+		node.Database.SetStopReason(job.JobId, "Insufficient deposit")
 		return true, nil
 	}
 
 	tProfiles, err := txDataToVideoProfile(job.TranscodingOptions)
 	if err != nil {
 		glog.Errorf("Error processing transcoding options: %v", err)
+		reason := fmt.Sprintf("Transcoding options: %v", err)
+		node.Database.SetStopReason(job.JobId, reason)
 		return false, err
 	}
 
@@ -142,7 +145,9 @@ func DoTranscode(node *core.LivepeerNode, job *lpTypes.Job) (bool, error) {
 	tr := transcoder.NewFFMpegSegmentTranscoder(tProfiles, node.WorkDir)
 	strmIDs, err := node.TranscodeAndBroadcast(config, cm, tr)
 	if err != nil {
-		glog.Errorf("Transcode Error: %v", err)
+		reason := fmt.Sprintf("Transcode error: %v", err)
+		glog.Errorf(reason)
+		node.Database.SetStopReason(job.JobId, reason)
 		return false, err
 	}
 
