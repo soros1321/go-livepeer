@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/big"
 	"text/template"
+	"time"
 
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/golang/glog"
@@ -22,6 +23,7 @@ type DB struct {
 	insertJob  *sql.Stmt
 	selectJobs *sql.Stmt
 	stopReason *sql.Stmt
+	insertRec  *sql.Stmt
 }
 
 type DBJob struct {
@@ -63,6 +65,21 @@ var schema = `
 		endBlock INTEGER,
 		stopReason STRING DEFAULT NULL,
 		stoppedAt STRING DEFAULT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS receipts (
+		jobID INTEGER NOT NULL,
+		claimID INTEGER,
+		seqNo INTEGER NOT NULL,
+		bcastHash STRING,
+		bcastSig STRING,
+		transcodedHash STRING,
+		transcodeStartedAt STRING,
+		transcodeEndedAt STRING,
+		errorMsg STRING DEFAULT NULL,
+		PRIMARY KEY(jobID, seqNo),
+		FOREIGN KEY(jobID) REFERENCES jobs(id)
+		FOREIGN KEY(claimID) REFERENCES claims(id)
 	);
 `
 
@@ -133,6 +150,15 @@ func InitDB(dbPath string) (*DB, error) {
 	}
 	d.stopReason = stmt
 
+	// Insert receipt prepared statement
+	stmt, err = db.Prepare("INSERT INTO receipts(jobID, seqNo, bcastHash, bcastSig, transcodedHash, transcodeStartedAt, transcodeEndedAt) VALUES(?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		glog.Error("Unable to prepare insert segment ", err)
+		d.Close()
+		return nil, err
+	}
+	d.insertRec = stmt
+
 	// Check for correct DB version and upgrade if needed
 	var dbVersion int
 	row := db.QueryRow("SELECT value FROM kv WHERE key = 'dbVersion'")
@@ -170,6 +196,9 @@ func (db *DB) Close() {
 	}
 	if db.stopReason != nil {
 		db.stopReason.Close()
+	}
+	if db.insertRec != nil {
+		db.insertRec.Close()
 	}
 	if db.dbh != nil {
 		db.dbh.Close()
@@ -227,6 +256,24 @@ func (db *DB) SetStopReason(id *big.Int, reason string) error {
 	_, err := db.stopReason.Exec(reason, id.Int64())
 	if err != nil {
 		glog.Error("db: Error setting stop reason ", id, err)
+		return err
+	}
+	return nil
+}
+
+func (db *DB) InsertReceipt(jobID *big.Int, seqNo uint64, bcastHash []byte,
+	broadcasterSig []byte, transcodedHash []byte, transcodeStartedAt time.Time,
+	transcodeEndedAt time.Time) error {
+	glog.V(common.DEBUG).Infof("db: Starting transcode for %v - %v", jobID.String(), seqNo)
+	time2str := func(t time.Time) string {
+		return t.UTC().Format("2006-01-02 15:04:05")
+	}
+	_, err := db.stopReason.Exec(jobID.Int64(), seqNo,
+		ethcommon.ToHex(bcastHash), ethcommon.ToHex(broadcasterSig),
+		ethcommon.ToHex(transcodedHash),
+		time2str(transcodeStartedAt), time2str(transcodeEndedAt))
+	if err != nil {
+		glog.Error("db: Error inserting segment ", jobID, err)
 		return err
 	}
 	return nil

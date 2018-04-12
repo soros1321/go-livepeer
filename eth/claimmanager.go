@@ -22,7 +22,7 @@ var (
 )
 
 type ClaimManager interface {
-	AddReceipt(seqNo int64, bData []byte, bSig []byte, tData map[ffmpeg.VideoProfile][]byte) error
+	AddReceipt(seqNo int64, bData []byte, bSig []byte, tData map[ffmpeg.VideoProfile][]byte, dbInsert func(jobID *big.Int, bHash []byte, tHash []byte)) error
 	SufficientBroadcasterDeposit() (bool, error)
 	ClaimVerifyAndDistributeFees() error
 	CanClaim() (bool, error)
@@ -35,8 +35,8 @@ type claimData struct {
 	segData              []byte
 	dataHash             []byte
 	bSig                 []byte
-	transcodeProof       []byte
 	claimConcatTDatahash []byte
+	transcodeProof       []byte
 }
 
 //BasicClaimManager manages the claim process for a Livepeer transcoder.  Check the Livepeer protocol for more details.
@@ -140,7 +140,8 @@ func (c *BasicClaimManager) DidFirstClaim() bool {
 
 //AddReceipt adds a claim for a given video segment.
 func (c *BasicClaimManager) AddReceipt(seqNo int64, bData []byte, bSig []byte,
-	tData map[ffmpeg.VideoProfile][]byte) error {
+	tData map[ffmpeg.VideoProfile][]byte,
+	dbInsert func(jobID *big.Int, bHash []byte, tHash []byte)) error {
 
 	_, ok := c.segClaimMap[seqNo]
 	if ok {
@@ -179,6 +180,7 @@ func (c *BasicClaimManager) AddReceipt(seqNo int64, bData []byte, bSig []byte,
 	c.unclaimedSegs[seqNo] = true
 	// glog.Infof("Added %v. unclaimSegs: %v", seqNo, c.unclaimedSegs)
 
+	dbInsert(c.jobID, bHash, tHash)
 	return nil
 }
 
